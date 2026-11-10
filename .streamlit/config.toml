@@ -1,0 +1,15 @@
+[server]
+headless = true
+maxMessageSize = 180
+runOnSave = false
+
+[runner]
+fastReruns = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#d95100"
+backgroundColor = "#fafafa"

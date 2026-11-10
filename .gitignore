@@ -1,0 +1,17 @@
+/.venv/
+/.tools/
+/data/
+/tmp/
+/frontend/node_modules/
+/frontend/.npm-cache/
+**/__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+/.ipynb_checkpoints/
+/Personal_Reel_Studio_Requirements.pdf
+/Personal_Reel_Studio_WBS.pdf
+/ReelMate_Codex_Development.md
+/시안.png
