@@ -4,7 +4,7 @@ ReelMate는 완성 릴스에서 개인 편집 스타일을 저장하고, 협찬 
 
 ## Windows에서 실행
 
-이 폴더에 `.venv`가 준비되어 있으면 PowerShell에서 바로 시작할 수 있습니다. `streamlit_reelmate.py`가 `frontend/dist`의 빌드를 사용하며, 빌드 파일이 없으면 내장된 화면을 사용합니다.
+이 폴더에 `.venv`가 준비되어 있으면 PowerShell에서 바로 시작할 수 있습니다. `streamlit_reelmate.py`는 저장소의 `frontend/dist/` React 빌드와 `frontend/streamlit.css`를 사용합니다. 앱 실행에는 Node.js가 필요하지 않습니다.
 
 ```powershell
 Set-Location C:\reelmate
@@ -23,11 +23,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup_windows.ps1 -Rebuild
 
 Python 경로를 직접 지정하려면 `-Python` 인수를 사용하세요. 별도 FFmpeg 설치를 사용하려면 `REELMATE_FFMPEG_BIN`에 `ffmpeg.exe`와 `ffprobe.exe`가 들어 있는 폴더를 지정할 수 있습니다. Windows 미리보기는 맑은 고딕 Bold를 사용합니다. 다른 한글 글꼴은 `REELMATE_FONT`로 지정하세요. [FFmpeg 다운로드](https://www.ffmpeg.org/download.html)
 
+React 원본은 `frontend/src/`에 있고 HTML 템플릿은 `frontend/index.html`입니다. 원본을 수정하면 `-Rebuild`로 빌드하고 `frontend/dist/`의 결과도 함께 반영하세요.
+
 ## 작업 순서
 
 1. **프로젝트**에서 브랜드, 제품, 목표 길이, 비율을 설정합니다. 승인된 스타일이 있으면 선택할 수 있습니다.
 2. **자료**에서 촬영 원본, 완성 레퍼런스, PDF·TXT 가이드를 따로 등록합니다. 텍스트 가이드는 직접 입력할 수 있습니다. 가이드 원문을 대조해 브랜드 규칙을 저장하고 승인합니다.
-3. **분석**에서 촬영 원본의 장면 후보를 확인합니다. 필요한 장면 구간을 좁힌 뒤 라벨을 확인하거나 후보를 제외합니다. 레퍼런스 3편 이상을 등록하면 컷 전환 후보와 평균 컷 길이를 측정할 수 있습니다. CLIP·OCR을 함께 쓰거나 첫 제품 노출과 자막 특성을 직접 기록한 뒤 스타일 프로필을 승인하세요. 스타일은 JSON으로 저장·가져올 수 있습니다.
+3. **분석**에서 촬영 원본의 장면 후보를 확인합니다. 필요한 장면 구간을 좁힌 뒤 라벨을 확인하거나 후보를 제외합니다. 완성 레퍼런스 1편 이상을 등록하면 컷 전환 후보와 평균 컷 길이를 측정할 수 있습니다. CLIP·OCR을 함께 쓰거나 첫 제품 노출과 자막 특성을 직접 기록한 뒤 스타일 프로필을 승인하세요. 스타일은 JSON으로 저장·가져올 수 있습니다.
 4. **검토**에서 컷을 직접 추가하거나 수동 초안으로 시작합니다. 컷 순서와 원본 시간을 수정하고 자막 문구·시간·위치를 저장합니다. 컷 잠금과 같은 길이의 선택 컷 교체를 지원합니다. 검수는 충족, 미충족, 직접 확인 필요로 구분합니다. 필수 장면은 사람이 확인한 라벨과 타임코드를 사용하며, 화면과 음성 조건은 직접 확인 근거를 기록합니다.
 5. **내보내기**에서 저장된 버전의 MP4와 편집 패키지를 생성합니다. 대체 ZIP의 개별 MP4를 번호순으로 편집기에 배치하고 SRT를 따로 가져오세요. 컷시트 CSV, EDL JSON, 검수 JSON도 ZIP에 포함됩니다. CapCut 편집 프로젝트 ZIP은 Windows 9.x의 시험용 초안에 적용해 컷과 텍스트를 독립 트랙으로 구성합니다. 실제 앱에서 편집·저장·재열기는 검증 대기입니다. [CapCut 초안 준비 및 적용](docs/capcut-validation.md)
 
@@ -56,7 +58,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup_windows.ps1 -AI -Whi
 
 ## Streamlit Community Cloud 배포
 
-Streamlit Community Cloud의 **Create app**에서 이 GitHub 저장소와 `main` 브랜치를 선택합니다. Main file path는 `streamlit_reelmate.py`, Python 버전은 `3.12`로 지정합니다. Cloud는 `packages.txt`에서 FFmpeg, 한글 글꼴과 OCR 언어 데이터를 설치하고, `requirements.txt`에서 CPU용 CLIP 및 Whisper 의존성을 설치합니다. 저장소에 포함된 React 빌드를 사용합니다.
+Streamlit Community Cloud의 **Create app**에서 이 GitHub 저장소와 `main` 브랜치를 선택합니다. Main file path는 `streamlit_reelmate.py`, Python 버전은 `3.12`로 지정합니다. Cloud는 `packages.txt`에서 FFmpeg, 한글 글꼴과 OCR 언어 데이터를 설치하고, `requirements.txt`에서 CPU용 CLIP 및 Whisper 의존성을 설치합니다. 배포에는 `streamlit_reelmate.py`, `reelmate/`, `.streamlit/config.toml`, `requirements.txt`, `packages.txt`, `frontend/streamlit.css`, `frontend/dist/` 전체가 포함되어야 합니다.
 
 Gemini를 사용하려면 앱의 **Settings → Secrets**에 `GEMINI_API_KEY`와 `GEMINI_MODEL`을 TOML 문자열로 등록합니다. CLIP과 Whisper 가중치는 각 기능을 처음 실행할 때 내려받습니다. 기본 실행은 세션별 저장 모드이며, 새 브라우저 세션에서는 별도 작업 공간이 열립니다. 결과 파일은 작업 중에 내려받으세요.
 

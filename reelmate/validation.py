@@ -47,8 +47,11 @@ def unique(entries, id_field, name):
         raise ReelMateError(f"{name} ID가 중복되었습니다.")
 
 
-def prepare_plan(project, value, previous=None, source="manual", model=None):
+def prepare_plan(project, value, previous=None, source="manual", model=None, *, allow_source_reuse=None,
+                 allow_existing_excluded=False):
     value = record(value, "편집안")
+    if allow_source_reuse is None:
+        allow_source_reuse = (previous or {}).get("allow_source_reuse") is True
     segment_map = {s["segment_id"]: s for s in project["segments"]}
     assets = {a["asset_id"]: a for a in project["assets"] if a["role"] == "source"}
     old_clips = {c["clip_id"]: c for c in previous["clips"]} if previous else {}
@@ -57,8 +60,12 @@ def prepare_plan(project, value, previous=None, source="manual", model=None):
     for entry in items(value.get("clips"), "컷", 120):
         entry = record(entry, "컷")
         clip_id = object_id(entry["clip_id"], "컷") if entry.get("clip_id") else uid()
-        segment = segment_map.get(object_id(entry.get("segment_id"), "후보"))
-        if segment is None or segment["excluded"] or segment["asset_id"] not in assets:
+        segment_id = object_id(entry.get("segment_id"), "후보")
+        segment = segment_map.get(segment_id)
+        old = old_clips.get(clip_id)
+        retaining_candidate = allow_existing_excluded and old is not None and old["segment_id"] == segment_id
+        if (segment is None or segment["asset_id"] not in assets
+                or (segment["excluded"] and not retaining_candidate)):
             raise ReelMateError("사용할 수 없는 후보가 있습니다. 분석 단계에서 장면을 확인하세요.")
         asset_id = segment["asset_id"]
         if entry.get("asset_id", asset_id) != asset_id:
@@ -70,9 +77,10 @@ def prepare_plan(project, value, previous=None, source="manual", model=None):
             raise ReelMateError("컷은 후보 구간 안에서 0.1초 이상이어야 합니다.")
         if "timeline_start" in entry and frames(number(entry["timeline_start"], "배치 시간", 0, 60)) != cursor:
             raise ReelMateError("컷 사이에 타임라인이 겹치거나 빈 구간이 있습니다.")
-        if any(c["asset_id"] == asset_id and start < c["source_out"] and end > c["source_in"] for c in clips):
+        if not allow_source_reuse and any(
+            c["asset_id"] == asset_id and start < c["source_out"] and end > c["source_in"] for c in clips
+        ):
             raise ReelMateError("동일 원본의 시간 구간이 중복 사용되었습니다.")
-        old = old_clips.get(clip_id)
         clips.append({
             "clip_id": clip_id, "segment_id": segment["segment_id"], "asset_id": asset_id,
             "source_in": start, "source_out": end, "timeline_start": seconds(cursor),
@@ -121,6 +129,7 @@ def prepare_plan(project, value, previous=None, source="manual", model=None):
         "target_duration": project["target_duration"],
         "aspect_ratio": project["aspect_ratio"],
         "actual_duration": seconds(cursor),
+        "allow_source_reuse": allow_source_reuse,
         "clips": clips, "subtitles": subtitles, "source": source, "model": model,
     }
 

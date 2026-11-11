@@ -53,7 +53,7 @@ export function ProjectForm({ ctx }) {
               <p>평균 컷 {profile.avg_shot_length}초 · 레퍼런스 근거 {profile.evidence.length}편</p></div>
           </div> : <div className="style-description">
             <Clapperboard size={20} /><div><strong>{approved.length ? '기본 편집 설정' : '아직 승인된 스타일이 없습니다'}</strong>
-              <p>완성 릴스 3편을 자료 단계에 등록하면 편집 스타일을 측정하고 저장할 수 있습니다.</p></div>
+              <p>자료 단계에서 완성 릴스를 1편 이상 등록하면 편집 스타일을 측정하고 저장할 수 있습니다.</p></div>
           </div>}
         </div>
       </div>

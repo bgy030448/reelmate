@@ -27,9 +27,7 @@ const sample = (color, name, audio = false) => {
   return file;
 };
 const sources = [sample('red', '원본 레드.mp4', true), sample('blue', '원본 블루.mp4')];
-const references = [
-  sample('orange', '스타일 A.mp4'), sample('purple', '스타일 B.mp4'), sample('green', '스타일 C.mp4'),
-];
+const reference = sample('orange', '스타일 A.mp4');
 
 const log = join(work, 'streamlit.log');
 let server;
@@ -78,9 +76,20 @@ try {
   await page.goto(url);
   const studio = page.frameLocator('iframe[title$=".studio"]');
   const button = (name) => studio.getByRole('button', { name, exact: true });
+  const stepButton = (name) => studio.getByRole('navigation', { name: '프로젝트 단계' })
+    .getByRole('button', { name: new RegExp(name + '$') });
   const field = (name) => studio.getByLabel(name, { exact: true });
   const heading = (name) => studio.getByRole('heading', { name, exact: true });
   const notice = (text) => studio.getByText(text, { exact: false }).first().waitFor();
+  async function checkStepButtons(buttons, enabled) {
+    for (const item of buttons) assert.equal(await item.isEnabled(), enabled, await item.textContent());
+  }
+  const reviewButtons = [stepButton('검토'), button('검토로 이동')];
+  const exportButtons = [stepButton('내보내기'), button('내보내기로 이동')];
+  async function excludeCandidates(excluded) {
+    const candidates = studio.getByLabel('편집에서 제외', { exact: true });
+    for (let i = 0; i < await candidates.count(); i++) await candidates.nth(i).setChecked(excluded);
+  }
   async function verifyNarrowPage() {
     await page.setViewportSize({ width: 390, height: 844 });
     const widths = await studio.locator('html').evaluate((html) => [html.scrollWidth, html.clientWidth]);
@@ -105,12 +114,12 @@ try {
 
   await field('촬영 원본 파일').setInputFiles(sources);
   await notice('자료 2개를 등록했습니다.');
-  await field('완성 레퍼런스 파일').setInputFiles(references);
-  await notice('자료 3개를 등록했습니다.');
+  await field('완성 레퍼런스 파일').setInputFiles(reference);
+  await heading('스타일 A.mp4').waitFor();
   await field('브랜드 가이드 파일').setInputFiles({
     name: '브랜드 가이드.txt', mimeType: 'text/plain', buffer: Buffer.from('첫 3초 내에 제품을 소개합니다.\n자막에 유료 광고를 표시합니다.'),
   });
-  await notice('자료 1개를 등록했습니다.');
+  await notice('가이드 원문 · 브랜드 가이드.txt');
 
   await button('규칙 추가').click();
   await studio.locator('.rule-card').nth(0).getByLabel('규칙 유형').selectOption('product_deadline');
@@ -126,6 +135,11 @@ try {
 
   await button('분석으로 이동').click();
   await heading('영상 분석').waitFor();
+  await stepButton('검토').click();
+  await heading('편집안 검토').waitFor();
+  await notice('편집안이 비어 있습니다');
+  await checkStepButtons(exportButtons, false);
+  await button('분석').click();
   await button('스타일 측정').click();
   await notice('레퍼런스 측정을 마쳤습니다.');
   await button('스타일 초안 열기').click();
@@ -149,10 +163,24 @@ try {
     await notice('CLIP으로 원본 2개를 분석했습니다.');
     await studio.getByText(/유사도 [0-9]/).first().waitFor();
   }
+  await excludeCandidates(true);
+  await checkStepButtons(reviewButtons, false);
+  await button('변경 취소').click();
+  await checkStepButtons(reviewButtons, true);
+  await excludeCandidates(true);
+  await button('장면 저장').click();
+  await notice('장면 후보를 저장했습니다.');
+  await checkStepButtons(reviewButtons, false);
+  await excludeCandidates(false);
   await studio.locator('.scene-card').first().getByLabel('분류').selectOption('product');
   await studio.locator('.scene-card').first().getByLabel('라벨 확인').check();
   await button('장면 저장').click();
   await notice('장면 후보를 저장했습니다.');
+  await checkStepButtons(reviewButtons, true);
+  await button('내 프로젝트').click();
+  await button('프로젝트 열기').click();
+  await heading('편집안 검토').waitFor();
+  await button('분석').click();
 
   await button('검토로 이동').click();
   await heading('편집안 검토').waitFor();
@@ -170,6 +198,7 @@ try {
   await studio.locator('.caption-card').nth(1).getByLabel('자막 위치').selectOption('top');
   await button('편집안 저장').click();
   await notice('편집안 v1을 저장했습니다.');
+  await checkStepButtons(exportButtons, true);
   await verifyNarrowPage();
   await button('컷 잠금').click();
   await notice('컷을 잠갔습니다.');
@@ -225,8 +254,36 @@ try {
   await heading('내보내기').waitFor();
   await download('다운로드 편집안 JSON');
   await download('다운로드 CapCut 프로젝트 ZIP');
+
+  await stepButton('검토').click();
+  await button('잠금 해제').click();
+  await notice('컷 잠금을 해제했습니다.');
+  await button('분석').click();
+  await excludeCandidates(true);
+  await button('장면 저장').click();
+  await notice('장면 후보를 저장했습니다.');
+  await checkStepButtons(reviewButtons, true);
+  await button('검토로 이동').click();
+  await heading('편집안 검토').waitFor();
+  assert(await button('컷 추가').isDisabled());
+  await studio.locator('.caption-card').first().getByLabel('자막 문구').fill('저장한 편집안의 자막 수정');
+  await checkStepButtons(exportButtons, false);
+  await button('편집안 저장').click();
+  await studio.getByRole('status').filter({ hasText: /편집안 v\d+을 저장했습니다/ }).waitFor();
+  await checkStepButtons(exportButtons, true);
+  await button('내보내기로 이동').click();
+  await heading('내보내기').waitFor();
+  await notice('이전에 생성한 버전은 내려받을 수 있습니다.');
+  await checkStepButtons(['현재 버전 출력 생성', 'CapCut 프로젝트 ZIP 생성'].map(button), false);
+  assert(readFileSync(await download('다운로드 자막 SRT'), 'utf8').includes('유료 광고 · 릴메이트'));
+  await page.reload();
+  await heading('편집안 검토').waitFor();
+  assert.equal(await studio.locator('.caption-card').first().getByLabel('자막 문구').inputValue(), '저장한 편집안의 자막 수정');
+  await stepButton('내보내기').click();
+  await download('다운로드 미리보기 MP4');
+  await download('다운로드 CapCut 프로젝트 ZIP');
   assert.deepEqual(errors, [], 'Browser errors: ' + errors.join('\n'));
-  console.log('Browser E2E passed (uploads, style, rules, timeline, Korean captions, playback, CapCut ZIP, reload, restart).');
+  console.log('Browser E2E passed (uploads, style, rules, step buttons, timeline, playback, versioned downloads, reload, restart).');
   console.log('Browser artifacts: ' + work);
 } catch (error) {
   await page?.screenshot({ path: join(work, 'failure.png'), timeout: 5000 }).catch(() => {});

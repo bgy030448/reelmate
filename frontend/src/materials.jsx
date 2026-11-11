@@ -12,7 +12,7 @@ const MB = 1024 * 1024;
 const mediaAccept = '.mp4,.mov,.m4v,.webm';
 const layouts = {
   source: { icon: Film, title: '촬영 원본', detail: '새 릴스에 사용할 원본을 등록하세요.', label: '촬영 원본 파일' },
-  reference: { icon: Sparkles, title: '완성 레퍼런스', detail: '스타일 분석에 사용할 완성본을 3편 이상 등록하세요.', label: '완성 레퍼런스 파일' },
+  reference: { icon: Sparkles, title: '완성 레퍼런스', detail: '스타일 분석에 사용할 완성본을 1편 이상 등록하세요.', label: '완성 레퍼런스 파일' },
   guide: { icon: FileText, title: '브랜드 가이드', detail: '브랜드가 전달한 가이드의 PDF 또는 텍스트를 등록하세요.', label: '브랜드 가이드 파일' },
 };
 
@@ -196,18 +196,19 @@ export function Materials({ ctx }) {
         <Button variant="primary" disabled={!guide.trim()} onClick={() => ctx.run('guide_text', { text: guide },
           { save: true, done: () => setWriting(false) })}>가이드 저장</Button></div>
     </section> : <RuleEditor ctx={ctx} />}
-    <Pager previous={() => ctx.goto(1)} next={() => ctx.goto(3)}
-      disabled={ctx.dirty || !project.assets.length} reason={!project.assets.length ? '영상 자료를 등록하면 분석할 수 있습니다.' : undefined}
+    <Pager ctx={ctx} previous={1} next={3}
+      reason={!project.assets.length ? '영상 자료를 등록하면 분석할 수 있습니다.' : undefined}
       nextLabel="분석으로 이동" />
   </Panel>;
 }
 
 export function Analysis({ ctx }) {
-  const { project, server } = ctx;
+  const { project, server, hasCandidates } = ctx;
   const [segments, change, discard] = useDraft(project.segments, project.revision, ctx);
   const [assetId, setAssetId] = useState('');
   const [useClip, setUseClip] = useState(false);
   const [useOcr, setUseOcr] = useState(false);
+  const [allowSourceReuse, setAllowSourceReuse] = useState(false);
   const sources = project.assets.filter((asset) => asset.role === 'source');
   const references = project.assets.filter((asset) => asset.role === 'reference');
   const current = sources.find((asset) => asset.asset_id === ctx.inspected?.assetId);
@@ -226,10 +227,9 @@ export function Analysis({ ctx }) {
       ...segment, start: numeric(segment.start), end: numeric(segment.end),
     })) }, { save: true, message: '장면 후보를 저장하는 중' });
   }
-  const hasCandidates = project.segments.some((segment) => !segment.excluded);
-  const create = (method) => ctx.run('plan_create', { method }, {
+  const create = (method) => ctx.run('plan_create', { method, allow_source_reuse: allowSourceReuse }, {
     message: method === 'gemini' ? 'Gemini가 편집안을 작성하는 중' : '편집 초안을 구성하는 중',
-    done: () => ctx.goto(4),
+    done: ctx.draftCreated,
   });
   return <Panel step={3} title="영상 분석" description="장면 후보를 확인하고 레퍼런스에서 내 편집 스타일을 측정하세요.">
     <div className="analysis-cards">
@@ -252,11 +252,11 @@ export function Analysis({ ctx }) {
             onChange={(event) => setUseOcr(event.target.checked)} />OCR 화면 글자</label>
         </div>
         <div className="button-row">
-          <Button icon={Sparkles} disabled={ctx.dirty || references.length < 3}
+          <Button icon={Sparkles} disabled={ctx.dirty || !references.length}
             onClick={() => ctx.run('style_measure', { clip: useClip, ocr: useOcr }, { message: '레퍼런스 스타일을 측정하는 중' })}>스타일 측정</Button>
           {project.style_draft && <Button disabled={ctx.dirty} onClick={() => ctx.openStyle(project.style_draft.profile_id)}>스타일 초안 열기</Button>}
         </div>
-        {references.length < 3 && <small>완성 레퍼런스 3편을 등록하면 측정할 수 있습니다.</small>}
+        {!references.length && <small>완성 레퍼런스를 1편 이상 등록하면 측정할 수 있습니다.</small>}
       </section>
     </div>
     <section className="subsection">
@@ -315,6 +315,8 @@ export function Analysis({ ctx }) {
     </section>
     {hasCandidates && !savedPlan && <section className="subsection">
       <div className="section-head"><div><h3>편집안 만들기</h3><p>현재 사용할 수 있는 장면 후보에서 시작합니다.</p></div></div>
+      <label className="check-label"><input type="checkbox" checked={allowSourceReuse} disabled={ctx.dirty}
+        onChange={(event) => setAllowSourceReuse(event.target.checked)} />원본이 부족하면 장면 재사용</label>
       <div className="button-row">
         <Button disabled={ctx.dirty} onClick={() => create('local')}>수동 편집 초안</Button>
         <Button variant="primary" icon={Sparkles} disabled={ctx.dirty || !server.capabilities.gemini}
@@ -324,6 +326,6 @@ export function Analysis({ ctx }) {
         {!server.capabilities.gemini && ' 서버 설정이 필요합니다.'}</p>
     </section>}
     {project.guide && !project.rules_approved && <Notice>가이드 규칙 승인 후 최종 영상을 생성할 수 있습니다.</Notice>}
-    <Pager previous={() => ctx.goto(2)} next={() => ctx.goto(4)} disabled={ctx.dirty || !hasCandidates} nextLabel="검토로 이동" />
+    <Pager ctx={ctx} previous={2} next={4} nextLabel="검토로 이동" />
   </Panel>;
 }

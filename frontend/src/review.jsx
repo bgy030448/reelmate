@@ -15,12 +15,16 @@ const origins = {
 const verdicts = { met: '충족', unmet: '미충족', review: '직접 확인 필요' };
 
 function PlanControls({ ctx, plan }) {
+  const [allowSourceReuse, setAllowSourceReuse] = useState(plan?.allow_source_reuse === true);
   const locked = plan?.clips.some((clip) => clip.locked);
-  const usable = ctx.project.segments.some((segment) => !segment.excluded);
-  const create = (method) => ctx.run('plan_create', { method }, {
+  const usable = ctx.hasCandidates;
+  const create = (method) => ctx.run('plan_create', { method, allow_source_reuse: allowSourceReuse }, {
     message: method === 'gemini' ? 'Gemini가 편집안을 작성하는 중' : '편집 초안을 구성하는 중',
   });
   return <div className="form-stack">
+    <label className="check-label"><input type="checkbox" checked={allowSourceReuse}
+      disabled={ctx.dirty || locked || !usable}
+      onChange={(event) => setAllowSourceReuse(event.target.checked)} />원본이 부족하면 장면 재사용</label>
     <div className="button-row">
       <Button disabled={ctx.dirty || locked || !usable} onClick={() => create('local')}>
         {plan ? '수동 초안 다시 만들기' : '수동 편집 초안'}
@@ -122,12 +126,18 @@ export function Review({ ctx }) {
   const activeClip = draft.clips[active];
   const currentOutput = project.downloads?.version === plan?.version ? project.downloads : null;
   let cursor = 0;
-  const timing = draft.clips.map((clip) => {
+  const timing = draft.clips.map((clip, index) => {
     const start = toSeconds(cursor);
-    const length = Math.max(0, frame(numeric(clip.source_out) - numeric(clip.source_in)));
+    const sourceIn = numeric(clip.source_in);
+    const sourceOut = numeric(clip.source_out);
+    const length = Math.max(0, frame(sourceOut - sourceIn));
+    const reused = length > 0 && draft.clips.slice(0, index).some((previous) =>
+      previous.asset_id === clip.asset_id && sourceIn < numeric(previous.source_out)
+      && sourceOut > numeric(previous.source_in));
     cursor += length;
-    return { start, length, end: toSeconds(cursor) };
+    return { start, length, end: toSeconds(cursor), reused };
   });
+  const reusedCuts = timing.filter((range) => range.reused).length;
   const duration = toSeconds(cursor);
   useEffect(() => { setActive((index) => Math.min(index, Math.max(0, draft.clips.length - 1))); }, [draft.clips.length]);
   useEffect(() => { if (!ctx.dirty) setTimelineDirty(false); }, [ctx.dirty]);
@@ -198,6 +208,7 @@ export function Review({ ctx }) {
         <span className="overline">EDIT PLAN</span>
         <h3>{project.product}</h3>
         <p>{project.aspect_ratio} · 목표 {project.target_duration}초 · 현재 {time(duration)}</p>
+        {reusedCuts > 0 && <p className="muted small">재사용된 컷 {reusedCuts}개</p>}
         {plan && <p className="muted small">{origins[plan.source] || plan.source}{plan.model ? ' · ' + plan.model : ''}</p>}
         <PlanControls ctx={ctx} plan={plan} />
         {plan && <div className="button-row">
@@ -221,8 +232,10 @@ export function Review({ ctx }) {
         {draft.clips.map((clip, index) => <button key={clip.clip_id || clip._key} type="button"
           onClick={() => setActive(index)} className={active === index ? 'current' : ''}
           style={{ flexGrow: Math.max(12, timing[index].length) }} aria-pressed={active === index}
-          aria-label={'컷 ' + (index + 1) + ' ' + time(timing[index].start)}>
-          {clip.locked && <Lock size={13} />}<span>{String(index + 1).padStart(2, '0')}</span>
+          aria-label={'컷 ' + (index + 1) + ' ' + time(timing[index].start) + (timing[index].reused ? ' · 재사용' : '')}>
+          {clip.locked && <Lock size={13} />}
+          {timing[index].reused && <RefreshCcw size={13} aria-hidden="true" />}
+          <span>{String(index + 1).padStart(2, '0')}</span>
         </button>)}
       </div>}
       {activeClip && (() => {
@@ -231,7 +244,8 @@ export function Review({ ctx }) {
         return <article className="cut-card">
           <div className="section-head"><div>
             <h4>컷 {active + 1} · {asset?.filename || '원본 없음'}</h4>
-            <p>{time(timing[active].start)} – {time(timing[active].end)} · {segment ? server.labels[segment.label] : '후보 없음'}</p>
+            <p>{time(timing[active].start)} – {time(timing[active].end)} · {segment ? server.labels[segment.label] : '후보 없음'}
+              {timing[active].reused && ' · 원본 재사용'}</p>
           </div><div className="button-row">
             {asset && <SourceButton ctx={ctx} asset={asset} at={numeric(activeClip.source_in) || 0} />}
             {activeClip.clip_id && <Button icon={activeClip.locked ? Unlock : Lock} disabled={ctx.dirty}
@@ -313,7 +327,7 @@ export function Review({ ctx }) {
       {timelineDirty && <EditActions ctx={ctx} discard={discard} submit={save} label="편집안 저장" />}
     </section>
     {plan && <BrandReview ctx={ctx} onSeek={seek} />}
-    <Pager previous={() => ctx.goto(3)} next={() => ctx.goto(5)} disabled={ctx.dirty || !plan} nextLabel="내보내기로 이동" />
+    <Pager ctx={ctx} previous={3} next={5} nextLabel="내보내기로 이동" />
   </Panel>;
 }
 
@@ -407,6 +421,6 @@ export function ExportPage({ ctx }) {
         <CheckCircle2 size={16} /><div><strong>{entry.message}</strong>
           <span>{dateText(entry.at)}{entry.plan_version != null && ' · v' + entry.plan_version}</span></div></li>)}</ol>
     </section>
-    <Pager previous={() => ctx.goto(4)} />
+    <Pager ctx={ctx} previous={4} />
   </Panel>;
 }

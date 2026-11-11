@@ -1,0 +1,4 @@
+[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"] { display: none; }
+[data-testid="stAppViewBlockContainer"] { padding: 0 !important; max-width: none !important; }
+[data-testid="stMainBlockContainer"] { padding: 0 !important; max-width: none !important; }
+iframe { display: block; }

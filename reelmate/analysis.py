@@ -186,8 +186,8 @@ def ocr_region(path):
 
 
 def measure_style(assets, directory, *, use_clip=False, use_ocr=False):
-    if len(assets) < 3:
-        raise ReelMateError("스타일을 측정하려면 완성 레퍼런스를 3편 이상 등록하세요.")
+    if not assets:
+        raise ReelMateError("스타일을 측정하려면 완성 레퍼런스를 1편 이상 등록하세요.")
     evidence = []
     cut_lengths = []
     text_regions = Counter()

@@ -1,6 +1,8 @@
 [server]
 headless = true
 maxMessageSize = 180
+# Component uploads encode up to 100 MiB of video as base64 in widget state.
+maxWidgetStateSize = 150
 runOnSave = false
 
 [runner]

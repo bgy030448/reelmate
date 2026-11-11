@@ -48,7 +48,8 @@ def render_parts(project, directory, work):
         audio = "0:a:0" if asset["has_audio"] else "1:a:0"
         run("ffmpeg", [
             *command, "-map", f"0:{asset['video_index']}", "-map", audio,
-            "-vf", f"{framing_filter(width, height)},tpad=stop_mode=clone:stop_duration={length:.9f}",
+            "-vf", f"setpts=PTS-STARTPTS,{framing_filter(width, height)},"
+            f"tpad=stop_mode=clone:stop_duration={length:.9f}",
             "-af", "aresample=48000:async=1:first_pts=0,apad",
             "-t", f"{length:.9f}", "-pix_fmt", "yuv420p", "-c:v", "libx264", "-threads:v", 4,
             "-preset", "fast", "-crf", 19, "-c:a", "pcm_s16le", "-ac", 2,

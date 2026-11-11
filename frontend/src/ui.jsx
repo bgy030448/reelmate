@@ -52,13 +52,15 @@ export function Field({ label, required = false, hint, children }) {
   </div>;
 }
 
-export function Pager({ previous, next, nextLabel = '다음 단계', disabled = false, reason, children }) {
+export function Pager({ ctx, previous, next, nextLabel = '다음 단계', reason, children }) {
   return <div className="pager">
-    {previous && <Button onClick={previous} icon={ArrowLeft}>이전 단계</Button>}
+    {previous && <Button onClick={() => ctx.goto(previous)} disabled={!ctx.canGoto(previous)} icon={ArrowLeft}>이전 단계</Button>}
     {children}
     <div className="pager-next">
       {reason && <small>{reason}</small>}
-      {next && <Button onClick={next} disabled={disabled} variant="primary">{nextLabel}<ArrowRight size={17} /></Button>}
+      {next && <Button onClick={() => ctx.goto(next)} disabled={!ctx.canGoto(next)} variant="primary">
+        {nextLabel}<ArrowRight size={17} />
+      </Button>}
     </div>
   </div>;
 }

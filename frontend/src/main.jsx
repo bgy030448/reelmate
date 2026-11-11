@@ -14,11 +14,16 @@ const send = (type, fields = {}) => window.parent.postMessage(
   { isStreamlitMessage: true, type, ...fields }, window.location.origin,
 );
 
+const hasUsableCandidates = (project) => Boolean(project?.segments.some((segment) => !segment.excluded));
+
 function suggestedStep(project) {
   if (!project) return 1;
-  if (project.plan && [project.downloads, project.capcut_download].some((output) =>
-    output?.version === project.plan.version)) return 5;
-  if (project.plan) return 4;
+  if (project.plan) {
+    const hasCurrentOutput = [...project.outputs, ...project.capcut_exports].some((output) =>
+      output.version === project.plan.version);
+    return hasCurrentOutput ? 5 : 4;
+  }
+  if (hasUsableCandidates(project) && project.history.some((entry) => entry.action === 'candidates_save')) return 4;
   return project.assets.length ? 3 : 2;
 }
 
@@ -26,7 +31,7 @@ function Hero() {
   return <header className="hero">
     <div>
       <span className="eyebrow"><span /> CREATOR WORKSPACE</span>
-      <h1>내 스타일로, <em>협찬 릴스 초벌 편집하기</em></h1>
+      <h1>내 스타일로, <em>협업 릴스 초안 생성하기</em></h1>
       <p>촬영 원본과 브랜드 가이드에서 컷과 자막을 구성하고, 내 편집 스타일을 다시 사용하세요.</p>
     </div>
     <svg className="hero-art" viewBox="0 0 256 150" fill="none" aria-hidden="true">
@@ -151,31 +156,38 @@ function App() {
     setView(destination);
   }
 
-  function goto(next) {
-    if (dirty || pending) return;
+  function showStep(next) {
     inspect(null);
-    setNotice(null);
     setStep(next);
     setView('workflow');
   }
 
   const project = newProject ? null : server?.project;
+  const hasAssets = Boolean(project?.assets.length);
+  const hasCandidates = hasUsableCandidates(project);
+  const hasPlan = Boolean(project?.plan);
+  const available = [true, Boolean(project), hasAssets, hasCandidates || hasPlan, hasPlan];
+  const canGoto = (next) => available[next - 1] && !dirty && !pending;
+
+  function goto(next) {
+    if (!canGoto(next)) return;
+    setNotice(null);
+    showStep(next);
+  }
+
   const ctx = {
-    server, project, dirty, setDirty, pending, run, goto, navigate,
+    server, project, dirty, setDirty, pending, run, goto, canGoto, navigate, hasCandidates,
     inspect: (assetId, at) => inspect({ assetId, at }),
     inspected, closeInspect: () => inspect(null),
     openStyle: (id) => { setStyleId(id); navigate('styles'); },
-    created: () => { setNewProject(false); setStep(2); setView('workflow'); },
+    created: () => { setNewProject(false); showStep(2); },
     opened: (next) => {
       setNewProject(false);
-      setStep(suggestedStep(next.project));
-      setView('workflow');
+      showStep(suggestedStep(next.project));
     },
+    draftCreated: ({ project: savedProject }) => { if (savedProject?.plan) showStep(4); },
   };
 
-  const hasAssets = Boolean(project?.assets.length);
-  const hasSources = Boolean(project?.assets.some((asset) => asset.role === 'source'));
-  const available = [true, Boolean(project), hasAssets, hasSources, Boolean(project?.plan)];
   const currentNav = view === 'workflow' ? 'new' : view;
 
   if (!server) return <main className="boot"><Busy message="ReelMate 작업 공간을 여는 중" /></main>;
@@ -207,7 +219,7 @@ function App() {
             {stepNames.map((name, index) => <button key={name} type="button" onClick={() => goto(index + 1)}
               aria-current={step === index + 1 ? 'step' : undefined}
               className={step === index + 1 ? 'current' : step > index + 1 ? 'complete' : ''}
-              disabled={!available[index] || dirty || !!pending}>
+              disabled={!canGoto(index + 1)}>
               <span className="step-dot">{step > index + 1 ? <Check size={15} /> : index + 1}</span>
               <span>{name}</span>
             </button>)}

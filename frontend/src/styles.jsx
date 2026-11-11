@@ -115,7 +115,7 @@ export function Styles({ ctx, id, setId }) {
       action={<><input className="sr-only" type="file" ref={file} accept=".json" onChange={importFile} tabIndex={-1} />
         <Button icon={Upload} disabled={ctx.dirty} onClick={() => file.current.click()}>스타일 JSON 가져오기</Button></>}>
       {!ctx.server.profiles.length && !draft && <Empty icon={Sparkles} title="저장한 스타일이 없습니다"
-        detail="프로젝트에 완성 릴스 3편을 등록하고 분석 단계에서 스타일을 측정하세요." />}
+        detail="프로젝트에 완성 릴스를 1편 이상 등록하고 분석 단계에서 스타일을 측정하세요." />}
       <div className="project-list">
         {ctx.server.profiles.map((profile) => <article key={profile.profile_id} className="project-row">
           <div className="asset-icon"><Sparkles size={21} /></div>

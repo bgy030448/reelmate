@@ -19,7 +19,7 @@ from .common import (
 )
 from .exporter import OUTPUT_FILES, export
 from .media import VIDEO_EXTENSIONS, executable, probe, thumbnail
-from .planner import manual_draft, replace_selected
+from .planner import available_footage_frames, fit_long_footage, manual_draft, replace_selected
 from .validation import clip_end, prepare_plan, rules_from_input, unique, validate
 
 
@@ -431,14 +431,22 @@ class Service:
             "subtitle": string(row.get("subtitle", ""), "자막 관찰", 200, True),
         }
 
-    def _accept_plan(self, project, value, origin, model=None):
-        project["plan"] = prepare_plan(project, value, project["plan"], origin, model)
+    def _accept_plan(self, project, value, origin, model=None, *, allow_source_reuse=None,
+                     allow_existing_excluded=False):
+        project["plan"] = prepare_plan(
+            project, value, project["plan"], origin, model, allow_source_reuse=allow_source_reuse,
+            allow_existing_excluded=allow_existing_excluded,
+        )
         project["confirmations"] = {}
 
     def _do_plan_create(self, project, _folder, body, _undo):
         if project["plan"] and any(c["locked"] for c in project["plan"]["clips"]):
             raise ReelMateError("잠근 컷이 있습니다. 검토 단계에서 잠금 해제 또는 선택 컷 재편집을 사용하세요.")
         profile = self.profile(project["profile_id"])
+        footage = available_footage_frames(project)
+        target = frames(project["target_duration"])
+        fill_shortfall = footage < target and body.get("allow_source_reuse") is True
+        select_for_target = footage > target
         if body.get("method") == "gemini":
             candidates = [{key: s[key] for key in
                            ("segment_id", "asset_id", "start", "end", "label", "human_verified", "similarity")}
@@ -447,24 +455,38 @@ class Service:
                 raise ReelMateError("Gemini 편집안을 만들려면 사용할 후보를 1~240개로 정리하세요.")
             style = {key: profile[key] for key in ("opening_style", "avg_shot_length", "preferred_sequence",
                                                   "subtitle_style", "pacing", "summary")} if profile else None
-            value = self.gemini.plan({
+            request = {
                 "brand": project["brand"], "product": project["product"], "target_duration": project["target_duration"],
                 "aspect_ratio": project["aspect_ratio"], "candidates": candidates, "rules": project["rules"],
                 "style": style,
-            })
+            }
+            if fill_shortfall:
+                request["fill_shortfall"] = True
+            if select_for_target:
+                request["select_for_target"] = True
+            value = self.gemini.plan(request)
             if profile:
                 for caption in value.get("subtitles", []) if isinstance(value.get("subtitles"), list) else []:
                     if isinstance(caption, dict):
                         caption["style"] = {"position": profile["subtitle_style"]["position"]}
-            self._accept_plan(project, value, "gemini", self.gemini.model)
+            if fill_shortfall:
+                seed = prepare_plan(project, value, allow_source_reuse=False)
+                value = manual_draft(project, profile, seed["clips"], allow_source_reuse=True)
+                value["subtitles"] = seed["subtitles"]
+            elif select_for_target:
+                seed = prepare_plan(project, value, allow_source_reuse=False)
+                value = fit_long_footage(project, profile, seed)
+            self._accept_plan(project, value, "gemini", self.gemini.model, allow_source_reuse=fill_shortfall)
             return "Gemini 편집안 초안을 저장했습니다. 타임라인과 브랜드 조건을 검토하세요."
-        self._accept_plan(project, manual_draft(project, profile), "local")
+        value = (fit_long_footage(project, profile) if select_for_target else
+                 manual_draft(project, profile, allow_source_reuse=fill_shortfall))
+        self._accept_plan(project, value, "local", allow_source_reuse=fill_shortfall)
         return "등록한 장면으로 편집안 초안을 만들었습니다. 컷과 자막을 검토하세요."
 
     def _do_plan_save(self, project, _folder, body, _undo):
         previous = project["plan"]
         model = previous["model"] if previous else None
-        self._accept_plan(project, body, "manual", model)
+        self._accept_plan(project, body, "manual", model, allow_existing_excluded=True)
         return f"편집안 v{project['plan']['version']}을 저장했습니다."
 
     def _do_clip_lock(self, project, _folder, body, _undo):

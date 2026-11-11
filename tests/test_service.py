@@ -40,12 +40,13 @@ def test_upload_failure_preserves_prior_files(project, media_samples, tmp_path):
     assert sorted(p.relative_to(project.directory) for p in project.directory.rglob("*") if p.is_file()) == files
 
 
-def test_reference_only_style_measurement_and_roundtrip(project, media_samples, tmp_path):
-    project.upload(media_samples, role="reference")
+@pytest.mark.parametrize("reference_count", [1, 3])
+def test_reference_only_style_measurement_and_roundtrip(project, media_samples, tmp_path, reference_count):
+    project.upload(media_samples[:reference_count], role="reference")
     assert project.data["segments"] == []
     project.do("style_measure", clip=False, ocr=False)
     draft = project.data["style_draft"]
-    assert len(draft["evidence"]) == 3
+    assert len(draft["evidence"]) == reference_count
     assert draft["avg_shot_length"] == 6
     approved = project.do("profile_save", **(draft | {"name": "제품 소개 스타일", "approve": True,
                             "observations": [{"asset_id": draft["evidence"][0]["asset_id"],
@@ -131,6 +132,22 @@ def test_clip_lock_must_be_released_separately(project, media_samples):
     assert project.data["plan"]["clips"][0]["source_in"] == 1
 
 
+def test_edit_keeps_existing_excluded_cuts_without_allowing_new_ones_or_output(project, media_samples):
+    project.upload(media_samples[:2])
+    project.do("plan_save", clips=project.two_cuts(), subtitles=[])
+    project.do("candidates_save", segments=[scene | {"excluded": True} for scene in project.data["segments"]])
+    clips = project.data["plan"]["clips"]
+
+    project.do("plan_save", clips=clips, subtitles=[{"text": "수정한 자막", "start": 0, "end": 2}])
+    assert project.data["plan"]["clips"] == clips
+    assert project.data["plan"]["subtitles"][0]["text"] == "수정한 자막"
+    with pytest.raises(ReelMateError, match="사용할 수 없는 후보"):
+        project.do("plan_save", clips=[clips[0] | {"clip_id": None}, clips[1]], subtitles=[])
+    for action in ("export", "capcut_export"):
+        with pytest.raises(ReelMateError, match="사용할 수 없는 후보"):
+            project.do(action)
+
+
 def test_overlap_and_unsatisfied_duration(project, media_samples):
     project.upload(media_samples[:2])
     first, _ = project.two_cuts()
@@ -140,6 +157,100 @@ def test_overlap_and_unsatisfied_duration(project, media_samples):
     assert not validate(project.data, project.directory)["valid"]
     with pytest.raises(ReelMateError, match="목표"):
         project.do("export")
+
+
+def test_short_footage_can_fill_target_when_reuse_is_enabled(project, media_samples, tmp_path, monkeypatch):
+    source = tmp_path / "촬영 원본 20초.mp4"
+    run("ffmpeg", ["-v", "error", "-stream_loop", -1, "-i", media_samples[0], "-t", 20,
+                   "-c:v", "libx264", "-c:a", "aac", source])
+    project.upload([source])
+    project.do("project_settings", **(project.settings | {"target_duration": 45, "aspect_ratio": "1:1"}))
+    project.do("plan_create", method="local")
+    assert project.data["plan"]["actual_duration"] == 20
+    project.do("plan_create", method="local", allow_source_reuse=True)
+    assert project.data["plan"]["actual_duration"] == 45
+
+    def suggestion(request):
+        assert request["fill_shortfall"] is True
+        assert request["target_duration"] == 45
+        return {
+            "clips": [{"segment_id": request["candidates"][0]["segment_id"], "source_in": 0, "source_out": 5}],
+            "subtitles": [{"text": "초안 자막", "start": 0, "end": 2}],
+        }
+
+    monkeypatch.setattr(project.service.gemini, "plan", suggestion)
+    project.do("plan_create", method="gemini", allow_source_reuse=True)
+    plan = project.data["plan"]
+    assert plan["actual_duration"] == 45
+    assert plan["clips"][0]["source_out"] == 5
+    assert plan["subtitles"][0]["text"] == "초안 자막"
+    assert plan["allow_source_reuse"]
+    project.do("plan_save", clips=plan["clips"], subtitles=plan["subtitles"])
+    assert validate(project.data, project.directory)["valid"]
+
+    project.do("export")
+    output = project.directory / project.data["outputs"][0]["directory"] / "preview.mp4"
+    assert probe(output)["duration"] == 45
+
+
+def test_long_footage_keeps_required_and_style_cuts_in_45_second_mp4(project, media_samples, tmp_path, monkeypatch):
+    source = tmp_path / "촬영 원본 60초.mp4"
+    inputs = [arg for color in ("black", "blue", "green", "red") for arg in
+              ("-f", "lavfi", "-i", f"color={color}:s=160x120:d=15:r=30")]
+    run("ffmpeg", ["-v", "error", *inputs, "-filter_complex", "concat=n=4:v=1:a=0",
+                   "-c:v", "libx264", source])
+    assert probe(source)["duration"] == 60
+    project.upload([source])
+    asset_id = project.data["assets"][0]["asset_id"]
+    labels = ("unknown", "detail", "use", "product")
+    project.do("candidates_save", segments=[
+        {"asset_id": asset_id, "label": label, "start": index * 15, "end": (index + 1) * 15,
+         "human_verified": label != "unknown"}
+        for index, label in enumerate(labels)
+    ])
+    scenes = project.data["segments"]
+    project.do("rules_save", rules=[{"type": "product_deadline", "value": "product", "deadline_sec": 2}])
+    project.do("rules_approve", confirmed=True)
+    profile_id = project.service.dispatch("profile_import", {
+        "name": "제품에서 사용 장면으로", "avg_shot_length": 5, "approve": True,
+        "preferred_sequence": ["product", "use", "detail"], "subtitle_style": {"position": "top"},
+    })["profile_id"]
+    project.do("project_settings", **(project.settings | {
+        "target_duration": 45, "aspect_ratio": "1:1", "profile_id": profile_id,
+    }))
+
+    def suggestion(request):
+        assert request["select_for_target"] is True
+        assert request["style"]["preferred_sequence"] == ["product", "use", "detail"]
+        return {
+            "clips": [{"segment_id": s["segment_id"], "source_in": s["start"], "source_out": s["end"]}
+                      for s in scenes],
+            "subtitles": [
+                {"text": "제외할 화면", "start": 0, "end": 2},
+                {"text": "사용 방법", "start": 30, "end": 32},
+                {"text": "제품 소개", "start": 45, "end": 47},
+            ],
+        }
+
+    monkeypatch.setattr(project.service.gemini, "plan", suggestion)
+    for method in ("local", "gemini"):
+        project.do("plan_create", method=method, allow_source_reuse=True)
+        plan = project.data["plan"]
+        assert plan["actual_duration"] == 45
+        assert not plan["allow_source_reuse"]
+        assert [clip["source_in"] for clip in plan["clips"][:3]] == [45, 30, 15]
+        assert all(clip["source_in"] >= 15 and clip["source_out"] - clip["source_in"] == 5
+                   for clip in plan["clips"])
+        assert validate(project.data, project.directory)["valid"]
+
+    assert [(s["text"], s["start"], s["end"], s["style"]["position"])
+            for s in plan["subtitles"]] == [("제품 소개", 0, 2, "top"), ("사용 방법", 5, 7, "top")]
+    project.do("export")
+    output = project.directory / project.data["outputs"][0]["directory"] / "preview.mp4"
+    encoded_video = json.loads(run("ffprobe", [
+        "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration,nb_frames", "-of", "json", output,
+    ]).stdout)["streams"][0]
+    assert (float(encoded_video["duration"]), int(encoded_video["nb_frames"])) == (45, 1350)
 
 
 def test_unverified_rules_and_gemini_failure_leave_draft(project, media_samples):
